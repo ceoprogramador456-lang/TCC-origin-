@@ -15,14 +15,15 @@ if (!email || !senha) {
   process.exit(1);
 }
 
-async function main(): Promise<void> {
+async function main(email: string, senha: string): Promise<void> {
+  const passwordHash = await bcrypt.hash(senha, 12);
   const user = await prisma.usuario.upsert({
     where: { email },
-    update: { senha: bcrypt.hashSync(senha, 12) },
+    update: { senha: passwordHash },
     create: {
       nome: 'Administrador ETEC',
       email,
-      senha: bcrypt.hashSync(senha, 12),
+      senha: passwordHash,
       tipo: 'ADMIN',
       especialidade: null,
       status: 'ATIVO',
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
   console.log(`OK: id=${user.id} email=${user.email} tipo=${user.tipo} status=${user.status}`);
 }
 
-main()
+main(email, senha)
   .catch((error: unknown) => {
     console.error(error);
     process.exitCode = 1;
