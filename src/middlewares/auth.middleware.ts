@@ -66,7 +66,7 @@ export async function authenticateDevice(
   }
 
   const device = await findDeviceByTokenHash(hashDeviceToken(value));
-  if (!device) {
+  if (!device || device.revokedAt) {
     throw new UnauthorizedError('X-Token inválido.');
   }
 
