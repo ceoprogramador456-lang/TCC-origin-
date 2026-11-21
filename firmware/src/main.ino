@@ -1,69 +1,47 @@
 #include <Arduino.h>
-#include <ArduinoJson.h>
-#include <HTTPClient.h>
 #include <WiFi.h>
-
+#include <time.h>
 #include "config.h"
-#include "display.h"
 #include "sensor.h"
+#include "display.h"
 #include "wifi_manager.h"
+#include "pairing.h"
 
-unsigned long lastSendAt = 0;
-
-void sendReading(float vazao) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Wi-Fi desconectado, pulando envio.");
-    return;
-  }
-
-  HTTPClient http;
-  String url = String("http://") + API_HOST + ":" + API_PORT + API_PATH;
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Token", DEVICE_X_TOKEN);
-
-  JsonDocument payload;
-  payload["esp_id"] = ESP_ID;
-  payload["setor"] = SETOR;
-  payload["sensor_id"] = SENSOR_ID;
-  payload["vazao"] = vazao;
-
-  String body;
-  serializeJson(payload, body);
-
-  int statusCode = http.POST(body);
-  if (statusCode > 0) {
-    Serial.printf("Leitura enviada (vazao=%.2f L/min) -> HTTP %d\n", vazao, statusCode);
-  } else {
-    Serial.printf("Falha ao enviar leitura: %s\n", http.errorToString(statusCode).c_str());
-  }
-  http.end();
-}
+static uint32_t lastSample;
+static uint32_t lastDisplay;
+static float lastFlow;
+static bool clockStarted = false;
 
 void setup() {
   Serial.begin(115200);
-
-  // O display sobe primeiro para conseguir mostrar as instruções do portal
-  // Wi-Fi. O sensor sobe por último: o contador de pulsos só deve começar
-  // depois da conexão, senão o tempo parado no portal viraria uma vazão falsa
-  // na primeira leitura.
   setupDisplay();
-  showMessage("SIVA", "Iniciando...", "");
-  connectWiFi();
   setupFlowSensor();
-
-  lastSendAt = millis();
+  lastSample = millis();
+  network::begin();
+  pairing::begin();
 }
 
 void loop() {
-  unsigned long now = millis();
-  unsigned long elapsed = now - lastSendAt;
-
-  if (elapsed >= SEND_INTERVAL_MS) {
-    float vazao = readFlowRate(elapsed);
-    Serial.printf("Vazao: %.2f L/min\n", vazao);
-    showReading(vazao, WiFi.status() == WL_CONNECTED);
-    sendReading(vazao);
-    lastSendAt = now;
+  network::tick();
+  if (!clockStarted && WiFi.status() == WL_CONNECTED) {
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    clockStarted = true;
   }
+  pairing::tick();
+
+  const uint32_t now = millis();
+  const uint32_t elapsed = now - lastSample;
+  if (elapsed >= SEND_INTERVAL_MS) {
+    lastFlow = readFlowRate(elapsed);
+    lastSample = now;
+    Serial.printf("Vazao: %.2f L/min\n", lastFlow);
+    pairing::sendReading(lastFlow);
+  }
+  if (now - lastDisplay >= 500) {
+    lastDisplay = now;
+    const bool portal = network::manager.getConfigPortalActive();
+    drawStatus(lastFlow, pairing::state.espId, pairing::state.code, pairing::message,
+               portal ? network::portalPassword : String());
+  }
+  delay(1);
 }
