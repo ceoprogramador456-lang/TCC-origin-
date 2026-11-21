@@ -1,8 +1,8 @@
 import { httpClient } from '../api/http-client';
 import type { PaginatedResult, QueryParams } from '../../types/api';
 import type {
-  CreateDevicePayload,
-  CreatedDevice,
+  ApproveDevicePayload,
+  PendingDevice,
   Device,
   UpdateDevicePayload,
 } from '../../types/device';
@@ -14,16 +14,6 @@ export interface ListDevicesParams {
   empresaId?: number | null;
 }
 
-/**
- * Operações de dispositivo ESP32.
- *
- * Contrato confirmado no back-end (`src/modules/devices`):
- *  - `GET    /api/devices?empresaId=&setorId=` → já escopado pela empresa do ator;
- *  - `GET    /api/devices/:id` → dispositivo (sem token);
- *  - `POST   /api/devices`     → cria (ADMIN, GESTOR) e devolve o **token uma única vez**;
- *  - `PATCH  /api/devices/:id` → edita (ADMIN, GESTOR) — o token não é alterado;
- *  - `DELETE /api/devices/:id` → remove (ADMIN, GESTOR).
- */
 export const deviceService = {
   list(token: string, params: ListDevicesParams = {}): Promise<PaginatedResult<Device>> {
     const query: QueryParams = {
@@ -39,8 +29,24 @@ export const deviceService = {
     return httpClient.get<Device>(`/devices/${id}`, { token });
   },
 
-  create(token: string, payload: CreateDevicePayload): Promise<CreatedDevice> {
-    return httpClient.post<CreatedDevice>('/devices', payload, { token });
+  pending(token: string): Promise<PendingDevice[]> {
+    return httpClient.get<PendingDevice[]>('/devices/pending', { token });
+  },
+
+  approve(token: string, id: string, payload: ApproveDevicePayload): Promise<void> {
+    return httpClient.post(`/devices/pairing/${encodeURIComponent(id)}/approve`, payload, {
+      token,
+    });
+  },
+
+  reject(token: string, id: string): Promise<void> {
+    return httpClient.post(`/devices/pairing/${encodeURIComponent(id)}/reject`, undefined, {
+      token,
+    });
+  },
+
+  revoke(token: string, id: number): Promise<void> {
+    return httpClient.post(`/devices/${id}/revoke`, undefined, { token });
   },
 
   update(token: string, id: number, payload: UpdateDevicePayload): Promise<Device> {
