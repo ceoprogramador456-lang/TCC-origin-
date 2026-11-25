@@ -5,10 +5,11 @@ import {
   authorize,
 } from '../../../middlewares/auth.middleware.js';
 import { validate } from '../../../middlewares/validate.middleware.js';
-import { AppError } from '../../../shared/errors/app-error.js';
+import { AppError, UnauthorizedError } from '../../../shared/errors/app-error.js';
 import { ok } from '../../../shared/http/api-response.js';
 import { deviceController } from '../controllers/device.controller.js';
 import { pairingController } from '../controllers/pairing.controller.js';
+import { streamDeviceEvents } from '../services/device-events.service.js';
 import {
   deviceIdParamSchema,
   listDevicesQuerySchema,
@@ -43,6 +44,12 @@ deviceRoutes.get('/me', authenticateDevice, (req, res) => {
 });
 
 deviceRoutes.use(authenticateUser);
+deviceRoutes.get('/events', (req, res) => {
+  if (!req.userSessionExpiresAt) throw new UnauthorizedError('Sessão sem expiração.');
+  // Limita a duração da conexão para revalidar a sessão durante reconexões.
+  const expiresAt = Math.min(req.userSessionExpiresAt, Date.now() + 30 * 60_000);
+  streamDeviceEvents(req.user!, expiresAt, res);
+});
 deviceRoutes.get('/pending', manage, pairingController.pending);
 deviceRoutes.post(
   '/pairing/:id/approve',

@@ -17,7 +17,6 @@ export type CreateDeviceInput = CreateDeviceDTO & { tokenHash: string };
 
 export type DeviceRepository = CrudRepository<Device, CreateDeviceInput, UpdateDeviceDTO> & {
   findByTokenHash(tokenHash: string): Promise<Device | null>;
-  touchContact(id: number): Promise<void>;
 };
 
 function buildWhere(filter: Record<string, unknown>) {
@@ -78,9 +77,6 @@ const prismaRepository: DeviceRepository = {
   async findByTokenHash(tokenHash) {
     return prisma.esp32.findUnique({ where: { tokenHash } });
   },
-  async touchContact(id) {
-    await prisma.esp32.update({ where: { id }, data: { ultimoContato: new Date() } });
-  },
 };
 
 const mockRepository: DeviceRepository = {
@@ -101,9 +97,6 @@ const mockRepository: DeviceRepository = {
   },
   async findByTokenHash(tokenHash) {
     return devicesMock.findOne((item) => item.tokenHash === tokenHash);
-  },
-  async touchContact(id) {
-    devicesMock.update(id, { ultimoContato: new Date() });
   },
 };
 

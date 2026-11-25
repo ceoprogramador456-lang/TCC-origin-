@@ -171,6 +171,47 @@ describe('Pareamento do ESP32', () => {
     expect(history.body.data).toHaveLength(2);
   });
 
+  it('cria um ativo no pareamento, impede duplicata e mantém o vínculo na recuperação', async () => {
+    const first = placa('02:00:00:00:00:55');
+    const second = placa('02:00:00:00:00:56');
+    const [a, b] = await Promise.all(
+      [first, second].map(async (esp) => (await esp.descobrir().expect(200)).body.data),
+    );
+    const nome = 'Bomba de Reúso';
+    const approveNew = (sessionId: string, code: string, name = nome) =>
+      request(app)
+        .post(base + '/pairing/' + sessionId + '/approve')
+        .set('Authorization', gestor)
+        .send({ code, setorId: 1, novoAtivo: { nome: name } });
+    const list = () =>
+      request(app)
+        .get('/api/assets')
+        .query({ setorId: 1 })
+        .set('Authorization', gestor)
+        .expect(200);
+
+    await approveNew(a.sessionId, a.code === '000000' ? '000001' : '000000').expect(422);
+    expect((await list()).body.data).not.toContainEqual(expect.objectContaining({ nome }));
+    const approved = await approveNew(a.sessionId, a.code).expect(200);
+    const ativo = (await list()).body.data.find((asset: { nome: string }) => asset.nome === nome);
+    expect(ativo).toMatchObject({ setorId: 1, criticidade: 'media' });
+
+    const duplicate = await approveNew(b.sessionId, b.code, 'bomba de reuso').expect(409);
+    expect(duplicate.body.error.code).toBe('ASSET_ALREADY_EXISTS');
+    await aprovar(b.sessionId, b.code, gestor, 1, ativo.id).expect(200);
+
+    await request(app)
+      .post(base + '/' + approved.body.data.id + '/revoke')
+      .set('Authorization', gestor)
+      .expect(204);
+    const recovery = (await first.descobrir().expect(200)).body.data;
+    await approveNew(recovery.sessionId, recovery.code, 'Ativo durante recuperação').expect(409);
+    await aprovar(recovery.sessionId, recovery.code, gestor, 1, ativo.id).expect(200);
+    expect((await list()).body.data).not.toContainEqual(
+      expect.objectContaining({ nome: 'Ativo durante recuperação' }),
+    );
+  });
+
   it('limita tentativas e impede retirar uma credencial de sessão bloqueada', async () => {
     const esp = placa('02:00:00:00:00:33');
     const { sessionId, code } = (await esp.descobrir().expect(200)).body.data;

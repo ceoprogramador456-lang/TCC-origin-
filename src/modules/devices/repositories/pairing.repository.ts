@@ -21,6 +21,8 @@ interface PairingStore {
   company(id: number): Promise<{ id: number } | null>;
   sector(id: number): Promise<{ empresaId: number } | null>;
   asset(id: number): Promise<{ setorId: number } | null>;
+  assetByName(setorId: number, nome: string): Promise<{ id: number } | null>;
+  addAsset(setorId: number, nome: string): Promise<{ id: number }>;
   session(id: string): Promise<PairingSession | null>;
   sessionByMac(mac: string): Promise<PairingSession | null>;
   pending(empresaId?: number): Promise<PairingSession[]>;
@@ -43,6 +45,9 @@ function databaseStore(db: Prisma.TransactionClient): PairingStore {
     company: (id) => db.empresa.findUnique({ where: { id }, select: { id: true } }),
     sector: (id) => db.setor.findUnique({ where: { id }, select: { empresaId: true } }),
     asset: (id) => db.ativo.findUnique({ where: { id }, select: { setorId: true } }),
+    assetByName: (setorId, nome) =>
+      db.ativo.findFirst({ where: { setorId, nome }, select: { id: true } }),
+    addAsset: (setorId, nome) => db.ativo.create({ data: { setorId, nome }, select: { id: true } }),
     session: (id) => db.pairingSession.findUnique({ where: { id } }),
     sessionByMac: (mac) => db.pairingSession.findUnique({ where: { mac } }),
     pending: (empresaId) =>
@@ -77,6 +82,10 @@ function databaseStore(db: Prisma.TransactionClient): PairingStore {
 }
 
 const sessions = new Map<string, PairingSession>();
+function assetNameKey(name: string) {
+  return name.trim().normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
 const mockStore: PairingStore = {
   async company(id) {
     return mock.companies.findById(id);
@@ -86,6 +95,26 @@ const mockStore: PairingStore = {
   },
   async asset(id) {
     return mock.assets.findById(id);
+  },
+  async assetByName(setorId, nome) {
+    const key = assetNameKey(nome);
+    return mock.assets.findOne(
+      (asset) => asset.setorId === setorId && assetNameKey(asset.nome) === key,
+    );
+  },
+  async addAsset(setorId, nome) {
+    return mock.assets.create({
+      setorId,
+      nome,
+      tag: null,
+      tipo: null,
+      criticidade: 'media',
+      centroCusto: null,
+      fotoUrl: null,
+      manualUrl: null,
+      descricao: null,
+      criadoEm: new Date(),
+    });
   },
   async session(id) {
     return sessions.get(id) ?? null;

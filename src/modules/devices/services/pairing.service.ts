@@ -12,9 +12,10 @@ import {
 } from '../../../shared/errors/app-error.js';
 import type { AuthenticatedDevice, AuthenticatedUser } from '../../../types/express.js';
 import { hashDeviceToken } from '../../../utils/device-token.js';
-import { toPublicDevice } from '../entities/device.entity.js';
+import { isDeviceOnline, toPublicDevice } from '../entities/device.entity.js';
 import { logger } from '../../../utils/logger.js';
 import { pairingTransaction, pruneExpiredPairings } from '../repositories/pairing.repository.js';
+import { publishDeviceEvent, markDeviceOffline } from './device-events.service.js';
 import type { Approval, Discovery } from '../validators/pairing.validators.js';
 
 const lifetimeMs = 10 * 60_000;
@@ -91,7 +92,14 @@ export const pairingService = {
           throw new ConflictError('Já existe um pareamento para este equipamento.');
         if (previous.state === 'rejected')
           throw new ConflictError('Pareamento rejeitado. Aguarde a expiração.');
-        return { sessionId: previous.id, code: oledCode(previous), expiresAt: previous.expiresAt };
+        return {
+          response: {
+            sessionId: previous.id,
+            code: oledCode(previous),
+            expiresAt: previous.expiresAt,
+          },
+          discovered: false,
+        };
       }
       if (device && !device.revokedAt)
         throw new ConflictError(
@@ -107,12 +115,16 @@ export const pairingService = {
         expiresAt: new Date(Date.now() + lifetimeMs),
       };
       await store.replaceSession(session);
-      return { sessionId: session.id, code: oledCode(session), expiresAt: session.expiresAt };
+      return {
+        response: { sessionId: session.id, code: oledCode(session), expiresAt: session.expiresAt },
+        discovered: true,
+      };
     });
     void pruneExpiredPairings(empresaId).catch(() =>
       logger.warn('Falha na limpeza de pareamentos expirados.'),
     );
-    return result;
+    if (result.discovered) publishDeviceEvent(empresaId, 'device:discovered');
+    return result.response;
   },
 
   status(id: string, secret: string) {
@@ -163,14 +175,20 @@ export const pairingService = {
           state: attempts >= maxAttempts ? 'rejected' : 'pending',
         });
         // A transação deve confirmar as tentativas antes de devolver o erro HTTP.
-        return attempts >= maxAttempts ? ('locked' as const) : ('wrong' as const);
+        return {
+          kind: attempts >= maxAttempts ? ('locked' as const) : ('wrong' as const),
+          empresaId: session.empresaId,
+        };
       }
       const sector = await store.sector(input.setorId);
       if (!sector || sector.empresaId !== session.empresaId)
         throw new ForbiddenError('Setor fora da empresa do pareamento.');
-      const asset = await store.asset(input.ativoId);
-      if (!asset || asset.setorId !== input.setorId)
-        throw new ValidationError('Selecione um ativo do setor escolhido.');
+      const ativoId = 'ativoId' in input ? input.ativoId : undefined;
+      if (ativoId !== undefined) {
+        const asset = await store.asset(ativoId);
+        if (!asset || asset.setorId !== input.setorId)
+          throw new ValidationError('Selecione um ativo do setor escolhido.');
+      }
       const previous = await store.deviceByMac(session.mac);
       const tokenHash = hashDeviceToken(credential(session));
       const info = { firmwareVersion: session.firmwareVersion, model: session.model, tokenHash };
@@ -180,7 +198,8 @@ export const pairingService = {
         if (
           !previous.revokedAt ||
           previous.setorId !== input.setorId ||
-          sensor?.ativoId !== input.ativoId
+          ativoId === undefined ||
+          sensor?.ativoId !== ativoId
         ) {
           throw new ConflictError(
             'Para parear novamente, use o setor e o ativo do dispositivo revogado.',
@@ -196,6 +215,20 @@ export const pairingService = {
         const espId = 'esp-' + session.mac.replaceAll(':', '').toLowerCase();
         if (await store.deviceByEspId(espId))
           throw new ConflictError('Identificador já usado por outro cadastro.');
+        let assetId: number;
+        if ('novoAtivo' in input) {
+          const { nome } = input.novoAtivo;
+          if (await store.assetByName(input.setorId, nome)) {
+            throw new AppError(
+              'Já existe um ativo com esse nome no setor. Selecione o ativo existente.',
+              409,
+              'ASSET_ALREADY_EXISTS',
+            );
+          }
+          assetId = (await store.addAsset(input.setorId, nome)).id;
+        } else {
+          assetId = input.ativoId;
+        }
         device = await store.addDevice({
           ...info,
           mac: session.mac,
@@ -203,30 +236,39 @@ export const pairingService = {
           setorId: input.setorId,
           descricao: input.descricao || null,
         });
-        await store.addSensor(device.id, session.sensorId, input.ativoId);
+        await store.addSensor(device.id, session.sensorId, assetId);
       }
       await store.updateSession(id, {
         state: 'approved',
         expiresAt: new Date(Date.now() + lifetimeMs),
       });
-      return toPublicDevice(device);
+      return {
+        kind: 'approved' as const,
+        empresaId: session.empresaId,
+        device: toPublicDevice(device),
+      };
     });
-    if (result === 'locked')
+    if (result.kind === 'locked') {
+      publishDeviceEvent(result.empresaId, 'device:rejected');
       throw new AppError(
         'Limite de tentativas atingido. Pareamento rejeitado.',
         429,
         'PAIRING_LOCKED',
       );
-    if (result === 'wrong') throw new ValidationError('Código diferente do exibido no OLED.');
-    return result;
+    }
+    if (result.kind === 'wrong') throw new ValidationError('Código diferente do exibido no OLED.');
+    publishDeviceEvent(result.empresaId, 'device:approved');
+    return result.device;
   },
 
-  reject(id: string, user: AuthenticatedUser) {
-    return pairingTransaction(async (store) => {
+  async reject(id: string, user: AuthenticatedUser) {
+    const empresaId = await pairingTransaction(async (store) => {
       const session = await store.session(id);
       verifyPending(session, user);
       await store.updateSession(id, { state: 'rejected' });
+      return session.empresaId;
     });
+    publishDeviceEvent(empresaId, 'device:rejected');
   },
 
   pickup(id: string, secret: string) {
@@ -249,8 +291,9 @@ export const pairingService = {
     return pairingTransaction(async (store) => {
       const session = await store.session(id);
       const device = await store.deviceById(actor.id);
-      if (!session || !device || device.revokedAt || device.mac !== session.mac)
-        throw new ForbiddenError();
+      if (!device || device.revokedAt || device.tokenHash !== actor.tokenHash)
+        throw new UnauthorizedError('X-Token inválido.');
+      if (!session || device.mac !== session.mac) throw new ForbiddenError();
       if (session.state === 'closed') return;
       if (session.state !== 'approved' || hashDeviceToken(credential(session)) !== device.tokenHash)
         throw new ConflictError('Pareamento não aprovado.');
@@ -258,8 +301,8 @@ export const pairingService = {
     });
   },
 
-  revoke(id: number, user: AuthenticatedUser) {
-    return pairingTransaction(async (store) => {
+  async revoke(id: number, user: AuthenticatedUser) {
+    const result = await pairingTransaction(async (store) => {
       const device = await store.deviceById(id);
       if (!device) throw new NotFoundError('Dispositivo');
       const sector = await store.sector(device.setorId);
@@ -269,6 +312,11 @@ export const pairingService = {
       await store.updateDevice(id, { revokedAt: new Date() });
       const session = device.mac && (await store.sessionByMac(device.mac));
       if (session) await store.updateSession(session.id, { state: 'closed' });
+      return { empresaId: sector.empresaId, wasOnline: isDeviceOnline(device) };
     });
+    if (result) {
+      publishDeviceEvent(result.empresaId, 'device:revoked');
+      markDeviceOffline(id, result.empresaId, result.wasOnline);
+    }
   },
 };

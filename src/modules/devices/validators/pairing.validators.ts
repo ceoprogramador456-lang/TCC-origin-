@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createAssetSchema } from '../../assets/validators/asset.validators.js';
 
 export const discoverySchema = z
   .object({
@@ -14,13 +15,18 @@ export const discoverySchema = z
 
 export const sessionBody = z.object({ sessionId: z.string().uuid() }).strict();
 export const sessionParams = z.object({ id: z.string().uuid() });
-export const approvalSchema = z
-  .object({
-    code: z.string().regex(/^\d{6}$/),
-    setorId: z.number().int().positive(),
-    ativoId: z.number().int().positive(),
-    descricao: z.string().trim().max(100).optional(),
-  })
-  .strict();
+const approvalFields = z.object({
+  code: z.string().regex(/^\d{6}$/),
+  setorId: z.number().int().positive(),
+  descricao: z.string().trim().max(100).optional(),
+});
+export const approvalSchema = z.union([
+  approvalFields.extend({ ativoId: z.number().int().positive() }).strict(),
+  approvalFields
+    .extend({
+      novoAtivo: z.object({ nome: z.string().trim().pipe(createAssetSchema.shape.nome) }).strict(),
+    })
+    .strict(),
+]);
 export type Discovery = z.infer<typeof discoverySchema>;
 export type Approval = z.infer<typeof approvalSchema>;

@@ -25,6 +25,13 @@ const pendingDevice = {
   },
 };
 const pairingId = { name: 'id', in: 'path', required: true, schema: sessionId };
+const approvalFields = { code, setorId: numberField, descricao: textField };
+const newAsset = {
+  type: 'object',
+  required: ['nome'],
+  additionalProperties: false,
+  properties: { nome: { type: 'string', minLength: 2, maxLength: 100 } },
+};
 
 function jsonBody(properties: Record<string, object>, required = Object.keys(properties)) {
   return {
@@ -507,16 +514,56 @@ export const openApiDocument = {
         responses: dataResponse({ type: 'array', items: pendingDevice }),
       },
     },
+    '/devices/events': {
+      get: {
+        tags: ['Devices'],
+        security: [bearerAuth],
+        summary: 'Notifica alterações de dispositivos visíveis ao usuário',
+        description:
+          'Stream SSE. Eventos de pareamento exigem ADMIN ou GESTOR. Eventos de comunicação também são enviados a técnicos no escopo da empresa. O corpo de cada evento é {}.',
+        responses: {
+          '200': {
+            description: 'Stream de eventos',
+            content: { 'text/event-stream': { schema: textField } },
+          },
+          '401': { description: 'Sessão ausente ou inválida' },
+          '429': { description: 'Limite de conexões atingido' },
+        },
+      },
+    },
     '/devices/pairing/{id}/approve': {
       post: {
         ...managerApi,
         summary: 'Confirma o código e vincula o sensor ao ativo',
         parameters: [pairingId],
-        requestBody: jsonBody(
-          { code, setorId: numberField, ativoId: numberField, descricao: textField },
-          ['code', 'setorId', 'ativoId'],
-        ),
-        responses: { '200': itemResponse('#/components/schemas/Device') },
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: { ...approvalFields, ativoId: numberField },
+                    required: ['code', 'setorId', 'ativoId'],
+                  },
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: { ...approvalFields, novoAtivo: newAsset },
+                    required: ['code', 'setorId', 'novoAtivo'],
+                  },
+                ],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': itemResponse('#/components/schemas/Device'),
+          '409': { description: 'Pareamento encerrado, vínculo em conflito ou ativo já existente' },
+          '410': { description: 'Código expirado' },
+        },
       },
     },
     '/devices/pairing/{id}/reject': {
