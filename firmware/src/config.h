@@ -9,9 +9,6 @@
 #ifndef API_PORT
 #define API_PORT 443
 #endif
-#define WIFI_PORTAL_SSID "SIVA-setup"
-#define WIFI_CONNECT_TIMEOUT_S 20
-#define WIFI_PORTAL_TIMEOUT_S 180
 
 #define DEVICE_MODEL "ESP32 DevKit"
 #define FIRMWARE_VERSION "1.0.0"

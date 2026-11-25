@@ -13,30 +13,17 @@ inline void setupDisplay() {
   if (!displayReady) Serial.println("Falha ao iniciar o OLED.");
 }
 
-inline void drawStatus(float flow, const String& espId, const String& code, const char* message,
-                       const String& portalPassword) {
+inline void drawStatus(float flow, const char* espId, const char* code, const char* message) {
   if (!displayReady) return;
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  if (!portalPassword.isEmpty()) {
-    display.println("Configurar Wi-Fi");
-    display.println(WIFI_PORTAL_SSID);
-    display.println(portalPassword);
-    display.println(WiFi.softAPIP());
-  } else {
-    if (espId.isEmpty()) display.println("SIVA - ESP32");
-    else display.println(espId);
-    if (WiFi.status() == WL_CONNECTED) {
-      display.println(message);
-      if (!code.isEmpty()) {
-        display.setTextSize(2);
-        display.println(code);
-      }
-    } else {
-      display.println("Wi-Fi offline");
-    }
+  display.println(espId[0] ? espId : "SIVA - ESP32");
+  display.println(message);
+  if (code[0]) {
+    display.setTextSize(2);
+    display.println(code);
   }
   display.setTextSize(1);
   display.printf("%.2f L/min", flow);
