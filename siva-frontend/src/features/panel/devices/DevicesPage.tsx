@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { KeyRound, Pencil, Radio, RefreshCw, Trash2 } from 'lucide-react';
 
 import { AlertMessage } from '../../../components/ui/AlertMessage';
@@ -25,6 +25,7 @@ import { usePanelScope } from '../hooks/use-panel-scope';
 import { usePermissions } from '../hooks/use-permissions';
 import { DeviceFormDialog } from './components/DeviceFormDialog';
 import { PendingDevices } from './components/PendingDevices';
+import { useDeviceEvents } from './use-device-events';
 import type { AuthenticatedSession } from '../../auth/hooks/use-authenticated-session';
 
 const PAGE_SIZE = 10;
@@ -52,6 +53,7 @@ function DevicesPanel({
   const [page, setPage] = useState(1);
   const [filterSetorId, setFilterSetorId] = useState('');
   const [refresh, setRefresh] = useState(0);
+  const [pendingRefresh, setPendingRefresh] = useState(0);
   const [editing, setEditing] = useState<Device | null>(null);
   const [confirmation, setConfirmation] = useState<{
     device: Device;
@@ -80,6 +82,9 @@ function DevicesPanel({
     `${page}:${filterSetorId}`,
     30_000,
   );
+
+  const reloadPending = useCallback(() => setPendingRefresh((value) => value + 1), []);
+  useDeviceEvents(session.token, reload, reloadPending);
 
   const sectorName = new Map<number, string>(
     (sectors ?? []).map((sector: Sector) => [sector.id, sector.nome]),
@@ -218,6 +223,7 @@ function DevicesPanel({
             variant="outline"
             onClick={() => {
               setRefresh((value) => value + 1);
+              reloadPending();
               reload();
             }}
             disabled={isLoading}
@@ -246,7 +252,7 @@ function DevicesPanel({
             token={session.token}
             empresaId={empresaId}
             sectors={sectors ?? []}
-            refresh={refresh}
+            refresh={pendingRefresh}
             onApproved={reload}
           />
         )}

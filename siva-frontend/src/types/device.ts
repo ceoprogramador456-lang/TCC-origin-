@@ -22,12 +22,19 @@ export interface PendingDevice {
   ativoId?: number | null;
 }
 
-export interface ApproveDevicePayload {
+export type ApproveDevicePayload = {
   code: string;
   setorId: number;
-  ativoId: number;
   descricao?: string;
-}
+} & ({ ativoId: number; novoAtivo?: never } | { novoAtivo: { nome: string }; ativoId?: never });
+
+export type DeviceEvent =
+  | 'device:discovered'
+  | 'device:approved'
+  | 'device:rejected'
+  | 'device:revoked'
+  | 'device:online'
+  | 'device:offline';
 
 export interface UpdateDevicePayload {
   setorId?: number;

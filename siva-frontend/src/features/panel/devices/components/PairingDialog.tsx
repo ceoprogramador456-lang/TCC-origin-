@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AlertMessage } from '../../../../components/ui/AlertMessage';
 import { Button } from '../../../../components/ui/Button';
@@ -6,13 +6,17 @@ import { InputField, SelectField } from '../../../../components/ui/FormField';
 import { Modal } from '../../../../components/ui/Modal';
 import { useAsyncData } from '../../../../hooks/use-async-data';
 import { allPages } from '../../../../services/api/all-pages';
+import { ApiError } from '../../../../services/api/http-client';
 import { assetService } from '../../../../services/assets/asset.service';
 import { deviceService } from '../../../../services/devices/device.service';
 import type { PendingDevice } from '../../../../types/device';
 import type { Sector } from '../../../../types/sector';
 
+const NEW_ASSET = 'new';
+
 interface PairingDialogProps {
   request: PendingDevice;
+  available: boolean;
   token: string;
   sectors: Sector[];
   onClose: () => void;
@@ -21,6 +25,7 @@ interface PairingDialogProps {
 
 export function PairingDialog({
   request,
+  available,
   token,
   sectors,
   onClose,
@@ -29,19 +34,26 @@ export function PairingDialog({
   const [code, setCode] = useState('');
   const [setorId, setSetorId] = useState(String(request.setorId ?? ''));
   const [ativoId, setAtivoId] = useState(String(request.ativoId ?? ''));
+  const [assetName, setAssetName] = useState('');
   const [descricao, setDescricao] = useState('');
-  const [expired, setExpired] = useState(() => Date.parse(request.expiresAt) <= Date.now());
+  const [now, setNow] = useState(Date.now);
   const [saving, setSaving] = useState(false);
+  const [closed, setClosed] = useState(false);
   const [error, setError] = useState('');
+  const savingRef = useRef(false);
   const close = useCallback(() => {
-    if (!saving) onClose();
-  }, [saving, onClose]);
+    if (!savingRef.current) onClose();
+  }, [onClose]);
 
   useEffect(() => {
-    const delay = Math.max(0, Date.parse(request.expiresAt) - Date.now());
-    const timer = window.setTimeout(() => setExpired(true), delay);
-    return () => window.clearTimeout(timer);
-  }, [request.expiresAt]);
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const expiry = Date.parse(request.expiresAt);
+  const remaining = Number.isFinite(expiry) ? Math.max(0, Math.ceil((expiry - now) / 1_000)) : 0;
+  const expired = remaining === 0;
+  const unavailable = expired || !available || closed;
 
   const {
     data: assets,
@@ -63,22 +75,59 @@ export function PairingDialog({
   );
   const availableSectors = sectors.filter((sector) => sector.empresaId === request.empresaId);
   const availableAssets = (assets ?? []).filter((asset) => asset.setorId === Number(setorId));
+  const linked = Boolean(request.setorId || request.ativoId);
+  const assetSelection =
+    ativoId ||
+    (setorId && !linked && !isLoading && !assetsError && !availableAssets.length ? NEW_ASSET : '');
+  const creatingAsset = assetSelection === NEW_ASSET;
+  const assetOptions = availableAssets.map((asset) => ({
+    value: String(asset.id),
+    label: asset.nome,
+  }));
+  if (!linked) assetOptions.push({ value: NEW_ASSET, label: 'Criar novo ativo' });
+  const validAsset = creatingAsset
+    ? !linked && assetName.trim().length >= 2
+    : !isLoading &&
+      !assetsError &&
+      availableAssets.some((asset) => asset.id === Number(assetSelection));
+  const canApprove =
+    !saving &&
+    !unavailable &&
+    /^\d{6}$/.test(code) &&
+    availableSectors.some((sector) => sector.id === Number(setorId)) &&
+    validAsset;
 
   async function approve() {
-    if (saving || expired) return;
+    if (!canApprove || savingRef.current || Date.now() >= expiry) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
     try {
       await deviceService.approve(token, request.id, {
         code,
         setorId: Number(setorId),
-        ativoId: Number(ativoId),
+        ...(creatingAsset
+          ? { novoAtivo: { nome: assetName.trim() } }
+          : { ativoId: Number(assetSelection) }),
         ...(descricao.trim() && { descricao: descricao.trim() }),
       });
       onApproved();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Falha ao aprovar o dispositivo.');
+      if (cause instanceof ApiError) {
+        if (cause.status === 404 || cause.status === 410 || cause.code === 'PAIRING_LOCKED') {
+          setClosed(true);
+        }
+        if (cause.code === 'ASSET_ALREADY_EXISTS') reload();
+        setError(
+          cause.status >= 500
+            ? 'O servidor está indisponível. Tente novamente em instantes.'
+            : cause.message,
+        );
+      } else {
+        setError('Falha ao aprovar o dispositivo. Tente novamente.');
+      }
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -93,20 +142,9 @@ export function PairingDialog({
       footer={
         <>
           <Button variant="outline" onClick={close} disabled={saving}>
-            Cancelar
+            {unavailable ? 'Fechar' : 'Cancelar'}
           </Button>
-          <Button
-            type="submit"
-            form="pairing-form"
-            disabled={
-              saving ||
-              expired ||
-              isLoading ||
-              Boolean(assetsError) ||
-              !/^[0-9]{6}$/.test(code) ||
-              !availableAssets.some((asset) => asset.id === Number(ativoId))
-            }
-          >
+          <Button type="submit" form="pairing-form" disabled={!canApprove}>
             {saving ? 'Aprovando…' : 'Aprovar'}
           </Button>
         </>
@@ -120,11 +158,19 @@ export function PairingDialog({
           void approve();
         }}
       >
-        {expired && (
+        {expired ? (
           <AlertMessage tone="warning">
             Código expirado. Use a próxima solicitação do ESP32.
           </AlertMessage>
-        )}
+        ) : !available && !error ? (
+          <AlertMessage tone="warning">
+            Esta solicitação já foi encerrada. Confira a lista de pendentes.
+          </AlertMessage>
+        ) : !unavailable ? (
+          <p role="timer" className="text-sm tabular-nums text-slate-600">
+            Código válido por {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')}
+          </p>
+        ) : null}
         {error && <AlertMessage tone="danger">{error}</AlertMessage>}
         <InputField
           name="code"
@@ -133,8 +179,9 @@ export function PairingDialog({
           value={code}
           onChange={(value) => setCode(value.replace(/[^0-9]/g, '').slice(0, 6))}
           required
-          disabled={saving || expired}
+          disabled={saving || unavailable}
           autoComplete="off"
+          inputMode="numeric"
         />
         <SelectField
           name="setorId"
@@ -146,43 +193,50 @@ export function PairingDialog({
             label: sector.nome,
           }))}
           placeholder="Selecione o setor"
-          disabled={saving || Boolean(request.setorId)}
+          disabled={saving || unavailable || Boolean(request.setorId)}
           hint={
             !availableSectors.length ? 'Cadastre um setor nesta empresa para continuar.' : undefined
           }
           onChange={(value) => {
             setSetorId(value);
             setAtivoId('');
+            setAssetName('');
           }}
         />
         <SelectField
           name="ativoId"
           label="Ativo monitorado"
-          value={ativoId}
+          value={assetSelection}
           required
-          options={availableAssets.map((asset) => ({ value: String(asset.id), label: asset.nome }))}
-          placeholder="Selecione o ativo"
-          disabled={!setorId || saving || isLoading || Boolean(request.ativoId)}
-          hint={
-            setorId && !isLoading && !assetsError && !availableAssets.length
-              ? 'Cadastre um ativo no setor para associar as leituras deste sensor.'
-              : `Sensor ${request.sensorId}`
-          }
+          options={assetOptions}
+          placeholder={setorId && isLoading ? 'Carregando ativos…' : 'Selecione ou crie um ativo'}
+          disabled={!setorId || saving || unavailable || isLoading || Boolean(request.ativoId)}
           onChange={setAtivoId}
         />
+        {creatingAsset && (
+          <InputField
+            name="nomeAtivo"
+            label="Nome do ativo"
+            hint="Use pelo menos dois caracteres."
+            value={assetName}
+            required
+            disabled={saving || unavailable}
+            onChange={(value) => setAssetName(value.slice(0, 100))}
+          />
+        )}
         {assetsError && (
           <AlertMessage tone="danger">
             {assetsError}{' '}
-            <button type="button" onClick={reload} className="underline">
+            <button type="button" onClick={reload} disabled={saving} className="underline">
               Tentar novamente
             </button>
           </AlertMessage>
         )}
         <InputField
           name="descricao"
-          label="Nome (opcional)"
+          label="Nome do dispositivo (opcional)"
           value={descricao}
-          disabled={saving}
+          disabled={saving || unavailable}
           onChange={(value) => setDescricao(value.slice(0, 100))}
         />
       </form>
