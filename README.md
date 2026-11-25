@@ -148,7 +148,7 @@ npm run simulate:esp32
 
 ### Pareando um ESP32
 
-Ligue a placa com o firmware configurado para a API HTTPS. Na página **Dispositivos**, confira o código do OLED, selecione o setor e o ativo que recebe o sensor e aprove. O ESP32 salva a credencial em NVS e começa a enviar leituras. Consulte o [guia de instalação, pareamento e recuperação](docs/PAREAMENTO_ESP32.md).
+Ligue a placa com o firmware configurado para a API HTTPS. Na página **Dispositivos**, confira o código do OLED, escolha o setor e selecione ou crie o ativo que recebe o sensor. Após a aprovação, o ESP32 salva a credencial em NVS e começa a enviar leituras. Consulte o [guia de instalação, pareamento e recuperação](docs/PAREAMENTO_ESP32.md).
 
 ## 📜 Scripts disponíveis
 

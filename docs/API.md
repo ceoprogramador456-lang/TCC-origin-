@@ -5,7 +5,7 @@ Este documento complementa a documentação interativa: com o servidor rodando, 
 ## Convenções
 
 - **Base URL**: todas as rotas de negócio ficam sob `/api` (ex.: `http://localhost:3000/api/sectors`). `/api/health` não exige autenticação.
-- **Formato de resposta** — toda resposta é um envelope JSON:
+- **Formato de resposta** — chamadas REST com corpo retornam um envelope JSON:
   ```json
   { "success": true, "data": { }, "meta": { } }
   ```
@@ -55,6 +55,7 @@ Este documento complementa a documentação interativa: com o servidor rodando, 
 | `GET` | `/api/devices` | Bearer | — | Lista ESP32s (`?setorId=` ou `?empresaId=`; escopado; traz `online`) |
 | `GET` | `/api/devices/:id` | Bearer | — | Detalhe de um ESP32 (sem o token) |
 | `GET` | `/api/devices/pending` | Bearer | `ADMIN`, `GESTOR` | Lista pendências da empresa. Rotas de descoberta e aprovação no [guia de pareamento](PAREAMENTO_ESP32.md). |
+| `GET` | `/api/devices/events` | Bearer | — | Stream SSE de mudanças visíveis ao usuário, com corpo `{}` por evento. |
 | `PATCH` | `/api/devices/:id` | Bearer | `ADMIN`, `GESTOR` | Edita ESP32 (descrição, esp_id, setor — nunca o token) |
 | `DELETE` | `/api/devices/:id` | Bearer | `ADMIN`, `GESTOR` | Remove ESP32 |
 | `GET` | `/api/sensors` | Bearer | — | Lista sensores (`?esp32Id=` `?ativoId=` `?empresaId=` `?ativoStatus=`) |

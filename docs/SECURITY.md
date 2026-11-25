@@ -40,6 +40,8 @@ Este documento é deliberadamente honesto: lista o que está implementado **e** 
 
 A API verifica o hash SHA-256 da credencial e a revogação antes de aceitar leituras. A entrega pelo endpoint de retirada exige o segredo temporário da placa e HTTPS em produção. Códigos de confirmação expiram e têm tentativas limitadas. [Pareamento, configuração e revogação](PAREAMENTO_ESP32.md)
 
+O stream de dispositivos exige JWT no cabeçalho `Authorization`. A API confere papel e empresa ao enviar eventos e encerra a conexão se a autorização expirar ou mudar. As notificações contêm apenas o tipo do evento e um objeto vazio. Os dados do equipamento vêm das rotas REST com as permissões habituais.
+
 ## Segredos de produção
 
 Configure `JWT_SECRET` com um segredo aleatório de produção e `PAIRING_KEY` com 32 bytes aleatórios em hexadecimal. Guarde as duas chaves fora do repositório. A API usa a primeira para autenticar usuários e a segunda para o pareamento. [Configuração](PAREAMENTO_ESP32.md)
