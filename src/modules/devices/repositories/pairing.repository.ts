@@ -204,6 +204,7 @@ export async function pairingTransaction<T>(
     );
     return result;
   }
+
   for (let attempt = 0; ; attempt++) {
     try {
       return await prisma.$transaction((tx) => action(databaseStore(tx)), {
@@ -211,10 +212,16 @@ export async function pairingTransaction<T>(
       });
     } catch (error) {
       if (error instanceof AppError) throw error;
+
       if (!isPrismaError(error, 'P2034', 'P2002')) {
+        console.error('ERRO REAL DO PAREAMENTO:', error);
+
         throw new AppError('Persistência do pareamento indisponível.', 503, 'PAIRING_UNAVAILABLE');
       }
-      if (attempt === 3) throw new ConflictError('Pareamento em atualização. Tente novamente.');
+
+      if (attempt === 3) {
+        throw new ConflictError('Pareamento em atualização. Tente novamente.');
+      }
     }
   }
 }

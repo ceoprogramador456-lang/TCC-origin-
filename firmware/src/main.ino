@@ -42,7 +42,24 @@ void setup() {
   setupDisplay();
   setupFlowSensor();
   lastSample = millis();
+
+WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    Serial.printf(
+      "Wi-Fi desconectado! Motivo: %u\n",
+      info.wifi_sta_disconnected.reason
+    );
+  }
+
+  if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+    Serial.print("Wi-Fi conectado! IP: ");
+    Serial.println(WiFi.localIP());
+  }
+});
+
   network::begin();
+  Serial.print("MAC DO ESP32: ");
+Serial.println(WiFi.macAddress());
   readings = xQueueCreate(1, sizeof(float));
   deviceViews = xQueueCreate(1, sizeof(DeviceView));
   if (!readings || !deviceViews ||
@@ -73,5 +90,38 @@ void loop() {
     drawStatus(lastFlow, view.espId, online ? view.code : "",
                online && !network::storageError ? view.message : network::status());
   }
+
+static uint32_t ultimoDiagnostico = 0;
+
+if (millis() - ultimoDiagnostico >= 5000) {
+  ultimoDiagnostico = millis();
+
+  Serial.println("\n===== SIVA DIAGNOSTICO =====");
+
+  Serial.print("Wi-Fi: ");
+  Serial.println(
+    WiFi.status() == WL_CONNECTED
+      ? "CONECTADO"
+      : "DESCONECTADO"
+  );
+
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+
+  Serial.print("Estado: ");
+  Serial.println(
+    WiFi.status() == WL_CONNECTED
+      ? view.message
+      : network::status()
+  );
+
+  Serial.print("Codigo de pareamento: ");
+  Serial.println(
+    view.code[0] ? view.code : "AGUARDANDO"
+  );
+
+  Serial.println("===========================\n");
+}
+
   delay(1);
 }

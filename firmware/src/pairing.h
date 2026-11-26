@@ -87,8 +87,20 @@ inline bool discover() {
   payload["firmwareVersion"] = FIRMWARE_VERSION;
   payload["model"] = DEVICE_MODEL;
   payload["sensorId"] = SENSOR_ID;
-  int status = apiRequest("/api/devices/discovery", "X-Pairing-Secret", state.secret,
-                          &payload, &result);
+  
+int status = apiRequest("/api/devices/discovery", "X-Pairing-Secret", state.secret,
+                        &payload, &result);
+
+Serial.printf("SIVA DISCOVERY - HTTP STATUS: %d\n", status);
+
+if (status != 200 && status != 201) {
+    message = apiFailureMessage(
+        status,
+        status == 409 ? "Conferir no painel" : "Aguardando API"
+    );
+    return false;
+}
+
   if (status != 200 && status != 201) {
     message = apiFailureMessage(status, status == 409 ? "Conferir no painel" : "Aguardando API");
     return false;
